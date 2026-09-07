@@ -1,2 +1,9 @@
 # Loader
-simple program that loads elf file. the file could be dynamic and pie.
+
+A simple ELF loader written in C.
+
+### Current support
+
+* PIE and non-PIE executables
+* Basic shared library (`.so`) loading
+* `libc` support is not implemented yet
