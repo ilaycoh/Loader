@@ -7,3 +7,8 @@ A simple ELF loader written in C.
 * PIE and non-PIE executables
 * Basic shared library (`.so`) loading
 * `libc` support is not implemented yet
+
+### Exploit
+
+The Python exploit will work **only when the mapping address check is disabled**.
+
