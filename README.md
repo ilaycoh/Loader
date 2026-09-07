@@ -1,6 +1,6 @@
 # Loader
 
-A simple ELF loader written in C.
+A simple x86-64 ELF loader written in C.
 
 ### Current support
 
