@@ -643,7 +643,7 @@ int main(int argc, char *argv[], char *envp[]){
         }
         
     }
-
+                                                                                                //libc
 /* 
     unsigned  long new_argc = argc;             //stack preper
     char *new_argv[new_argc +1 ];
