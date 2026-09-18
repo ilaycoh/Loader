@@ -6,7 +6,7 @@ A simple x86-64 ELF loader written in C.
 
 * PIE and non-PIE executables
 * Basic shared library (`.so`) loading
-* `libc` support is not implemented yet
+* `libc`(musl) support is not implemented yet
 
 ### Exploit
 
