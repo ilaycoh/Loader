@@ -5,7 +5,7 @@
 #include "freestanding.h"
 #include <elf.h>
 #define max_ranges 256
-#define MAX_SYMBOLS 4096
+#define MAX_SYMBOLS 0x1000
 #define STACK_SZ 0x10000
 
 #define program "main"
@@ -496,7 +496,8 @@ int main(int argc, char *argv[], char *envp[]){
             char *so_strtab;
             Elf64_Sym *so_symtab;
             unsigned int so_syment = 0;
-
+            Elf64_Rela *so_plt;
+            unsigned long so_pltsz = 0;
 
             if(so_dyn_table != NULL){
                
@@ -510,9 +511,12 @@ int main(int argc, char *argv[], char *envp[]){
                         case DT_SYMENT: so_syment = (unsigned int)(so_dyn_table[j].d_un.d_val);break;
                         case DT_INIT_ARRAY: init_table[init_index].addr = so_base_load + so_dyn_table[j].d_un.d_ptr;break;
                         case DT_INIT_ARRAYSZ: init_table[init_index].size = so_dyn_table[j].d_un.d_val;init_index++;break;
+                        case DT_JMPREL: so_plt = (Elf64_Rela *)(so_base_load + so_dyn_table[j].d_un.d_ptr);break;
+                        case DT_PLTRELSZ: so_pltsz = so_dyn_table[j].d_un.d_val; break;
                     }
                 }
             }
+            
             unsigned int so_count_sym = 0;
             
             
@@ -521,7 +525,7 @@ int main(int argc, char *argv[], char *envp[]){
     
             for(int j = 0 ; j<so_count_sym; j++){
                 if(so_symtab[j].st_shndx == SHN_UNDEF){
-                print("not mine");
+                    print("not mine");
                     continue;
                 }
                 struct Global_sym curr_sym;
@@ -529,7 +533,6 @@ int main(int argc, char *argv[], char *envp[]){
                 unsigned long long so_temp_addr = (unsigned long long)so_symtab[j].st_value + so_base_load;
                 curr_sym.addr = so_temp_addr;
                 curr_sym.name = so_temp_name;
-                print(so_temp_name);
                 global_sym_table[global_sym_table_index] = curr_sym;
                 global_sym_table_index++;
             }
@@ -553,22 +556,73 @@ int main(int argc, char *argv[], char *envp[]){
                         *so_hole_addr_ptr = so_base_load + so_curr_rela.r_addend;
 
                     }
+                    if(so_type_rela == R_X86_64_GLOB_DAT){
+                       unsigned long long so_hole_addr = so_base_load + so_curr_rela.r_offset;
+                        for(int p = 0; p< count_ranges; p++){
+                            if(so_hole_addr >= protected_ranges[p].start && so_hole_addr <= protected_ranges[p].end)
+                            {
+                                print("Error: cant let you to overwrite my loader maps ;)");
+                                return 1;
+                            }
+                        }
+                        unsigned long long *so_hole_addr_ptr = (unsigned long long *)(so_hole_addr);
+                        *so_hole_addr_ptr = so_base_load + so_curr_rela.r_addend;
+
+                    }
+                    
                 }
 
+            }
+            int global_sym_table_len =  global_sym_table_index+1;
+            if(so_pltsz != 0 && so_plt != NULL){
+                print("here is the plt");
+                unsigned long so_jmp_sym_count = so_pltsz/sizeof(Elf64_Rela);
+                for(int j = 0; j< so_jmp_sym_count; j++){
+                    Elf64_Rela so_curr_rela = so_plt[j];
+                    unsigned long so_rela_type = (so_curr_rela.r_info) & (0xffffffff);
+                    if(so_rela_type == R_X86_64_JUMP_SLOT){
+                        unsigned long so_sym_index = so_curr_rela.r_info >> 32;
+                        Elf64_Sym so_curr_sym = so_symtab[so_sym_index];
+                        char *name = so_strtab + so_curr_sym.st_name;
+                        unsigned long long so_resolved_addr = 0;
+                        unsigned long long so_hole_addr = so_base_load + so_curr_rela.r_offset;
+                        unsigned long long *so_hole_addr_ptr = (unsigned long long *)so_hole_addr;
+                        for(int j=0; j<count_ranges;j++){
+                            if(so_hole_addr >= protected_ranges[j].start && so_hole_addr <= protected_ranges[j].end){
+                                print("Error: cant let you to overwrite my loader maps ;)");
+                                return 0;
+                            }  
+                        }
+                        bool found = false;
+                        for(int k = 0; k < global_sym_table_len;k++){
+                            if(strcmp(name,global_sym_table[k].name)){
+                                so_resolved_addr = global_sym_table[k].addr;
+                                found = true;
+                                break;
+                            }
+                        }
+                        if(!found){
+                            print("coulndt find a symbol");
+                            return 0;
+                        }
+                        else{
+                            *so_hole_addr_ptr = so_resolved_addr; 
+                            print("worked!");
+                        }
+                    }
+                }
             }
           
         }
      
 
 
-        int global_sym_table_len =  global_sym_table_index+1;
+        
       
         
 
         if(rela_ent != 0 && rela_table !=NULL){
             int count_reloc = rela_size / rela_ent;
-       
-            
             for(int i =0; i<count_reloc;i++){
                 Elf64_Rela current_rela = rela_table[i];
                 unsigned int type_rela = (current_rela.r_info) &(0xffffffff);
@@ -592,10 +646,10 @@ int main(int argc, char *argv[], char *envp[]){
                         }  
                     }
                     unsigned long long *hole_addr_ptr = (unsigned long long *)(hole_addr);
-                    unsigned long name_index = current_rela.r_info >> 32;
-                    char *name_sym = d_strtab + name_index;
-                    print("there is");
-                    unsigned long long resolved_addr;
+                    unsigned long sym_idx = current_rela.r_info >> 32;
+                    Elf64_Sym rela_sym = d_symtab[sym_idx];
+                    char *name_sym = d_strtab + rela_sym.st_name;
+                    unsigned long long resolved_addr = 0;
                     for(int j=0; j< global_sym_table_index; j++){
                         if(strcmp(name_sym, global_sym_table[j].name)){
                             resolved_addr = global_sym_table[j].addr;
@@ -608,19 +662,20 @@ int main(int argc, char *argv[], char *envp[]){
             }
            
         }
-
         if(d_pltrela != NULL){
+            unsigned long global_sym_table_len = global_sym_table_index +1;
             int count_plt_relas = d_pltrelsz / sizeof(Elf64_Rela);
-            
             for(int i = 0; i<count_plt_relas; i++){
                 Elf64_Rela plt_rela = d_pltrela[i];
                 unsigned long rela_type = (plt_rela.r_info) & (0xffffffff);
+                
                 if(rela_type == R_X86_64_JUMP_SLOT){
-                   unsigned long rela_name = (plt_rela.r_info) >> 32;
-                   char *name = d_strtab + rela_name;
-                   unsigned long long resolved_addr;
-                   unsigned long long hole_addr = base_addr +  plt_rela. r_offset;
-                   unsigned long long *hole_addr_ptr = (unsigned long long *)hole_addr;
+                    unsigned long sym_idx = (plt_rela.r_info) >> 32;
+                    Elf64_Sym rela_sym = d_symtab[sym_idx];             
+                    char *name = d_strtab + rela_sym.st_name;
+                    unsigned long long resolved_addr = 0;
+                    unsigned long long hole_addr = base_addr +  plt_rela.r_offset;
+                    unsigned long long *hole_addr_ptr = (unsigned long long *)hole_addr;
                     
                     for(int j=0; j<count_ranges;j++){
                         if(hole_addr >= protected_ranges[j].start && hole_addr <= protected_ranges[j].end){
@@ -628,23 +683,30 @@ int main(int argc, char *argv[], char *envp[]){
                             return 1;
                         }  
                     }
-                  
-                   for(int j =0 ; j< global_sym_table_len ; j++){
-                        
+                    
+                    bool found = false;
+                    for(int j =0 ; j< global_sym_table_len ; j++){              
                         if(strcmp(name , global_sym_table[j].name)){
-                            
+                            found = true;
                             resolved_addr = global_sym_table[j].addr;
                             break;
                         }
-                   }
-                   *hole_addr_ptr = resolved_addr;
+                    }
+                    if(!found){
+                        print("unresolved symbol");
+                    }
+                    else{
+                        print("ok");
+                        *hole_addr_ptr = resolved_addr;
+                    }
                 }
             }
+            
         }
         
     }
-                                                                                                //libc
-/* 
+
+    
     unsigned  long new_argc = argc;             //stack preper
     char *new_argv[new_argc +1 ];
     new_argv[0] = program;
@@ -680,14 +742,16 @@ int main(int argc, char *argv[], char *envp[]){
     auxv[4].a_type = AT_PAGESZ;
     auxv[4].a_un.a_val = 0x1000;
 
-    auxv[5].a_type = AT_RANDOM;
-    auxv[5].a_un.a_val = (unsigned long)((unsigned long long*)(00000000000));
+    //auxv[5].a_type = AT_RANDOM;
+    //auxv[5].a_un.a_val = 0;
+    //auxv[5].a_un.a_val = (unsigned long)((unsigned long long*)(00000000000));
+
 
     auxv[6].a_type = AT_BASE;
     auxv[6].a_un.a_val = 0;
    
     void *stack_map = mmap(NULL,STACK_SZ, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1 , 0);
-    print("stack");
+   
     
     if(stack_map == MAP_FAILED){
         print("failed at mapping a stack for the program");
@@ -695,9 +759,10 @@ int main(int argc, char *argv[], char *envp[]){
     }
     char *stack_top = (char *)stack_map + STACK_SZ;
     unsigned long sp = (unsigned long) stack_top;
-    print_hex(sp);
+  
     sp &= ~(unsigned long long)0xF;
     
+    print_hex(sp);
     
     char *all_str[argc+envp_count];
     int all_str_index = 0;
@@ -739,11 +804,15 @@ int main(int argc, char *argv[], char *envp[]){
         }
         
     }
-    print("hi");
+  
     new_argv[argc] =NULL;
     new_envp[envp_count]=NULL;
 
-              
+    sp -= 16;           //AT_RANDOM  
+    unsigned char *rand_bytes = (unsigned char *)sp;
+    for(int i = 0; i < 16; i++) rand_bytes[i] = i;
+    auxv[5].a_un.a_val = (unsigned long)rand_bytes;
+
     sp -= 8 * sizeof(Elf64_auxv_t);                 //auxv
     Elf64_auxv_t *new_auxv = (Elf64_auxv_t *)sp;
     for(int i= 0; i<8;i++){
@@ -755,6 +824,7 @@ int main(int argc, char *argv[], char *envp[]){
     for(int i = 0; i < envp_count;i++){
         new_s_envp[i] = new_envp[i];
     }
+    new_s_envp[envp_count] = NULL;
 
 
              
@@ -766,19 +836,18 @@ int main(int argc, char *argv[], char *envp[]){
 
 
   
-    sp -= sizeof(new_argc);                                         //argc
-    print("sp");
-    print_hex(sp);
+    sp -= sizeof(new_argc);
+    sp &= ~(unsigned long long)0xF;                                          //argc
     unsigned long long *new_s_argc = (unsigned long long *)sp;
     *new_s_argc = (unsigned  long )new_argc;
     
 
-    sp &= ~(unsigned long long)0xF;                                     
+                                        
 
 
-
+ 
     if(tls_count >0){
-
+        print("there is tls");
         unsigned long long tls_total_memsz = 0;                                                         //TLS
         unsigned long long tls_place_table[64];
 
@@ -832,13 +901,26 @@ int main(int argc, char *argv[], char *envp[]){
 
         print("there is");
     }
+    else{
+        unsigned long tls_memsz = 8;
+        void *tls_mmap = mmap(NULL,tls_memsz,PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE , -1 ,0);
+        unsigned long long *tls_p = (unsigned long long *)tls_mmap;
+        *tls_p = (unsigned long long)tls_p;
+        char *end_block = (char *)tls_p;
+        __asm__ volatile(
+            "mov $158, %%rax\n"
+            "mov $0x1002, %%rdi\n"
+            "mov %0, %%rsi\n"
+            "syscall\n"
+            :
+            :"r"(end_block)
+            : "rax", "rdi", "rsi", "rcx", "r11", "memory"
+        );
+    }
 
     void (*global_init[1024])();
     
     int global_init_index =0;
-    print("so");
-    print_hex((unsigned long long)init_index);
-    print_hex((unsigned long long)main_init_index);
     if(init_index != 0){                                                            //for so init
        for(int i= 0; i< init_index;i++){
             int init2_count =   init_table[i].size / sizeof(unsigned long long);
@@ -869,14 +951,14 @@ int main(int argc, char *argv[], char *envp[]){
     }
 
     print("ok");
-    int i =sys_getuid();
+    
     for(int i=0; i< global_init_index+1; i++){
         if(global_init[i] != 0){
             print_hex((unsigned long long)global_init[i]);
             print("d");
             global_init[i]();
         }
-    }*/
+    }
     print("he");
    
     
@@ -888,7 +970,7 @@ int main(int argc, char *argv[], char *envp[]){
 
    
 
-    print_hex((unsigned long long)1);        //for the attack from the python file
+    print_hex((unsigned long long)1);        //for the attack from task 7
     
     
     unsigned int check = sys_setresgid(65534,65534,65534);
@@ -907,10 +989,20 @@ int main(int argc, char *argv[], char *envp[]){
 
 
    Elf64_Addr entry_point = load_bias + pro_header.e_entry;
-    int a = sys_getuid();
+    int t = sys_getuid();
+/*
+    __asm__ volatile(
+    "mov %0, %%rsp\n"
+    "xor %%rbp, %%rbp\n"
+    "call *%1\n"
+    :
+    : "r"(sp) , "r"(entry_point)
+    : "memory"
+    );
+
+*/
     ((void(*)())entry_point)();
     print("?");
-
 
  
     return 0;
