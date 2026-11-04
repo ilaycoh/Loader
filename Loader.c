@@ -1043,7 +1043,7 @@ int main(int argc, char *argv[], char *envp[]){
 
  int t = sys_getuid();
  
-    __asm__ volatile(
+  /*  __asm__ volatile(        //for glibc(Incomplete)
         "mov %0, %%rsp\n"
         "xor %%rbp, %%rbp\n"
         "jmp *%1\n"
@@ -1051,7 +1051,7 @@ int main(int argc, char *argv[], char *envp[]){
         : "r"(sp), "r"(entry_point)
         : "memory"
     );
-
+*/
 
 
 
