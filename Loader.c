@@ -1018,7 +1018,20 @@ int main(int argc, char *argv[], char *envp[]){
 
     }
 
-
+    print_hex((unsigned long long)1);        //for the attack from task 7
+    
+    unsigned int check = sys_setresgid(65534,65534,65534);
+    if(check != 0){
+        print("failed,cant let you run this program as root ;)");
+        return 0;
+    }
+    unsigned int check2 = sys_setresuid(65534,65534,65534);
+   
+    if(check2 != 0){
+        print("failed, cant let you to run this program as root ;)");
+        return 0;
+    }
+   
     
     for(int i=0; i< global_init_index; i++){
         if(global_init[i] != 0){
@@ -1036,19 +1049,6 @@ int main(int argc, char *argv[], char *envp[]){
 
    
 
-    print_hex((unsigned long long)1);        //for the attack from task 7
-    
-    unsigned int check = sys_setresgid(65534,65534,65534);
-    if(check != 0){
-        print("failed,cant let you run this program as root ;)");
-        return 0;
-    }
-    unsigned int check2 = sys_setresuid(65534,65534,65534);
-   
-    if(check2 != 0){
-        print("failed, cant let you to run this program as root ;)");
-        return 0;
-    }
    
    
 
