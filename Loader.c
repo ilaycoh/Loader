@@ -1023,13 +1023,13 @@ int main(int argc, char *argv[], char *envp[]){
     unsigned int check = sys_setresgid(65534,65534,65534);
     if(check != 0){
         print("failed,cant let you run this program as root ;)");
-        return 0;
+        return 1;
     }
     unsigned int check2 = sys_setresuid(65534,65534,65534);
    
     if(check2 != 0){
         print("failed, cant let you to run this program as root ;)");
-        return 0;
+        return 1;
     }
    
     
