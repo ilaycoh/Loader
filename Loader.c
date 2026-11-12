@@ -239,7 +239,7 @@ int main(int argc, char *argv[], char *envp[]){
 
 
             }
-            void *map = mmap((void *)aligned_vaddr, aligned_size , port  ,  MAP_PRIVATE  | MAP_FIXED , fd, aligned_offset);
+            void *map = mmap((void *)aligned_vaddr, aligned_size , port | PROT_WRITE , MAP_ANONYMOUS | MAP_PRIVATE  | MAP_FIXED , -1, 0);
             if(map == MAP_FAILED){
                 print("maped faild");
                 return 0;
@@ -250,11 +250,14 @@ int main(int argc, char *argv[], char *envp[]){
             lseek(fd,pro_phdr.p_offset,SEEK_SET);
          
 
-            //ssize_t map_read = read(fd , (void *)pro_phdr.p_vaddr, pro_phdr.p_filesz);
-            //if(map_read > 0){
-                //print("good!!!");
-                //count++;
-            //}
+            ssize_t map_read = read(fd , load_bias +  (void *)pro_phdr.p_vaddr, pro_phdr.p_filesz);
+            if(map_read == 0){
+                print("failed to read the file");
+                return 1;
+                
+            }
+
+            mprotect((void *)aligned_vaddr, aligned_size, port);
 
         }
        
@@ -477,10 +480,24 @@ int main(int argc, char *argv[], char *envp[]){
                     unsigned long long so_aligned_memsz = (( so_page_offset + so_pro_phdr.p_memsz + 4095) / 4096) *4096;
                     unsigned long long so_aligned_offset = so_pro_phdr.p_offset - (so_pro_phdr.p_offset % 0x1000);
                     unsigned long long so_aligned_vaddr = so_pro_phdr.p_vaddr - ( so_pro_phdr.p_vaddr %4096);
-                    void *so_map = mmap((void *)(so_aligned_vaddr + so_base_load),so_aligned_memsz,so_prot,MAP_PRIVATE | MAP_FIXED ,win_fds[i],so_aligned_offset );
+                    unsigned long long so_aligned_filesz = ((so_page_offset + so_pro_phdr.p_filesz + 4095) / 4096) * 4096;
+
+                   void *so_map = mmap((void *)(so_aligned_vaddr + so_base_load), so_aligned_memsz, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE | MAP_FIXED, -1, 0);
                     if(so_map == MAP_FAILED){
-                        print("faild to map one of the  so segments :(");
+                        print("failed to map one of the so segments");
                         return 0;
+                    }
+
+                    lseek(win_fds[i], so_pro_phdr.p_offset, SEEK_SET);
+                    ssize_t so_read = read(win_fds[i], (void *)(so_base_load + so_pro_phdr.p_vaddr), so_pro_phdr.p_filesz);
+                    if(so_read != (ssize_t)so_pro_phdr.p_filesz){
+                        print("couldnt read one of the so");
+                        return 1;
+                    }   
+
+                    if(mprotect((void *)(so_aligned_vaddr + so_base_load), so_aligned_memsz, so_prot) != 0){
+                        print("mprotect failed");
+                        return 1;
                     }
                 }
             }
@@ -575,16 +592,21 @@ int main(int argc, char *argv[], char *envp[]){
                         bool found = false;
 
                         for(int k = 0; k < global_sym_table_index; k++){
-                            if(strcmp(name, global_sym_table[k].name) == 0){
+                            if(strcmp(name, global_sym_table[k].name)){
                                 symbol_address = global_sym_table[k].addr;
                                 found = true;
                                 break;
                             }
                         }
-
+                        
                         if(!found){
-                            print("couldnt find GLOB_DAT symbol");
-                            return 1;
+                            if(ELF64_ST_BIND(sym->st_info) == STB_WEAK){
+                                symbol_address = 0;          
+                            } else {
+                                print("couldnt find GLOB_DAT symbol: ");
+                                print(name);
+                                return 1;
+                            }
                         }
 
                         unsigned long long *so_hole_addr_ptr =
@@ -601,7 +623,7 @@ int main(int argc, char *argv[], char *envp[]){
             }
             int global_sym_table_len =  global_sym_table_index+1;
             if(so_pltsz != 0 && so_plt != NULL){
-                print("here is the plt");
+                
                 unsigned long so_jmp_sym_count = so_pltsz/sizeof(Elf64_Rela);
                 for(int j = 0; j< so_jmp_sym_count; j++){
                     Elf64_Rela so_curr_rela = so_plt[j];
@@ -633,11 +655,11 @@ int main(int argc, char *argv[], char *envp[]){
                         }
                         else{
                             *so_hole_addr_ptr = so_resolved_addr; 
-                            print("worked!");
                         }
                     }
                 }
             }
+            close(win_fds[i]);
           
         }
      
@@ -722,7 +744,6 @@ int main(int argc, char *argv[], char *envp[]){
                         print("unresolved symbol");
                     }
                     else{
-                        print("ok");
                         *hole_addr_ptr = resolved_addr;
                     }
                 }
@@ -999,10 +1020,8 @@ int main(int argc, char *argv[], char *envp[]){
 
 
     
-    for(int i=0; i< global_init_index+1; i++){
+    for(int i=0; i< global_init_index; i++){
         if(global_init[i] != 0){
-            print_hex((unsigned long long)global_init[i]);
-            print("d");
             global_init[i]();
         }
     }
@@ -1040,10 +1059,10 @@ int main(int argc, char *argv[], char *envp[]){
 
     
 
-
+close(fd);
  int t = sys_getuid();
  
-  /*  __asm__ volatile(        //for glibc(Incomplete)
+    __asm__ volatile(
         "mov %0, %%rsp\n"
         "xor %%rbp, %%rbp\n"
         "jmp *%1\n"
@@ -1051,7 +1070,7 @@ int main(int argc, char *argv[], char *envp[]){
         : "r"(sp), "r"(entry_point)
         : "memory"
     );
-*/
+
 
 
 
