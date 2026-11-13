@@ -1,5 +1,5 @@
 
-// gcc -static -no-pie -Wl,-Ttext-segment=0x70000000 -nostdlib -fno-builtin -g -fno-stack-protector loader.c freestanding.c -o loader
+// gcc -static -pie -nostdlib -fno-builtin -g -fno-stack-protector loader.c freestanding.c -o loader
 
 
 #include "freestanding.h"
